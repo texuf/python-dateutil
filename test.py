@@ -29,6 +29,14 @@ class RelativeDeltaTest(unittest.TestCase):
     now = datetime(2003, 9, 17, 20, 54, 47, 282310)
     today = date(2003, 9, 17)
 
+    def test28Days(self):
+        start_date = datetime(2000, 1, 1)
+        unit = relativedelta(days=1)
+        span = 28
+
+        end_date = start_date + unit * span
+        self.assertEqual(end_date, datetime(2000, 1, 29))
+
     def testNextMonth(self):
         self.assertEqual(self.now+relativedelta(months=+1),
                          datetime(2003, 10, 17, 20, 54, 47, 282310))
@@ -130,6 +138,11 @@ class RelativeDeltaTest(unittest.TestCase):
                          date(2000, 9, 16))
         self.assertEqual(self.today+relativedelta(yearday=261),
                          date(2003, 9, 18))
+
+    def testYearDayBug(self):
+        # Tests a problem reported by Adam Ryan.
+        self.assertEqual(date(2010, 1, 1)+relativedelta(yearday=15),
+                         date(2010, 1, 15))
 
     def testNonLeapYearDay(self):
         self.assertEqual(date(2003, 1, 1)+relativedelta(nlyearday=260),
@@ -2372,6 +2385,17 @@ class RRuleTest(unittest.TestCase):
                           datetime(1997, 9, 2, 18, 6, 18),
                           datetime(1997, 9, 2, 18, 18, 6)])
 
+    def testSecondlyByHourAndMinuteAndSecondBug(self):
+        # This explores a bug found by Mathieu Bridon.
+        self.assertEqual(list(rrule(SECONDLY,
+                              count=3,
+                              bysecond=(0,),
+                              byminute=(1,),
+                              dtstart=parse("20100322120100"))),
+                         [datetime(2010, 3, 22, 12, 1),
+                          datetime(2010, 3, 22, 13, 1),
+                          datetime(2010, 3, 22, 14, 1)])
+
     def testUntilNotMatching(self):
         self.assertEqual(list(rrule(DAILY,
                               count=3,
@@ -2842,12 +2866,14 @@ class RRuleTest(unittest.TestCase):
                           datetime(1999, 9, 2, 9, 0)])
 
     def testStrUnfold(self):
-        self.assertEqual(list(rrulestr(
-                              "FREQ=YEA\n RLY;COUNT=3\n", unfold=True,
-                              dtstart=parse("19970902T090000"))),
-                         [datetime(1997, 9, 2, 9, 0),
-                          datetime(1998, 9, 2, 9, 0),
-                          datetime(1999, 9, 2, 9, 0)])
+        for input in ("FREQ=YEA\n RLY;COUNT=3\n",
+                      "FREQ=YEA\n\tRLY;COUNT=3\n"):
+                self.assertEqual(list(rrulestr(
+                                        input, unfold=True,
+                                        dtstart=parse("19970902T090000"))),
+                                 [datetime(1997, 9, 2, 9, 0),
+                                  datetime(1998, 9, 2, 9, 0),
+                                  datetime(1999, 9, 2, 9, 0)])
 
     def testStrSet(self):
         self.assertEqual(list(rrulestr(
@@ -3741,9 +3767,9 @@ AAAOJZ6djgAAAA8nf9EPAAAAECpQ9ZAAAAARLDIpEQAAABIuE1ySAAAAEzDnJBMAAAAUM7hIlAAA
 ABU2jBAVAAAAFkO3G5YAAAAXAAAAAQAAAAE=
     """
 
-    TZICAL_EST5EDT = """
+    _template = """
 BEGIN:VTIMEZONE
-TZID:US-Eastern
+TZID{0}:US-Eastern
 X-MUMBLE:Once upon a time ...
 LAST-MODIFIED:19870101T000000Z
 TZURL:http://zones.stds_r_us.net/tz/US-Eastern
@@ -3765,6 +3791,10 @@ END:DAYLIGHT
 END:VTIMEZONE
     """
 
+    TZICAL_EST5EDT=_template.format('')
+    TZICAL_EST5EDT_X_DASH_ATTRIBUTE=_template.format(';X-WOO-HOO=frotzplotz')
+    TZICAL_EST5EDT_UTTERLY_GOOFY_ATTRIBUTE=_template.format(';SNORK=BORK')
+    
     def testStrStart1(self):
         self.assertEqual(datetime(2003,4,6,1,59,
                                   tzinfo=tzstr("EST5EDT")).tzname(), "EST")
@@ -3898,6 +3928,14 @@ END:VTIMEZONE
         self.assertEquals(t0, t2)
         self.assertEquals(nyc.dst(t0), timedelta(hours=1))
 
+    def testICalUnfolding(self):
+        """
+        Just making sure we don't barf while unfolding.
+        """
+        for string in ("ho: hum\r\n frotz", "ho: hum\r\n\tfrotz"):
+            tz = tzical(StringIO(string))
+            self.assertEqual(dict(), tz._vtz)
+
     def testICalStart1(self):
         tz = tzical(StringIO(self.TZICAL_EST5EDT)).get()
         self.assertEqual(datetime(2003,4,6,1,59,tzinfo=tz).tzname(), "EST")
@@ -3907,6 +3945,12 @@ END:VTIMEZONE
         tz = tzical(StringIO(self.TZICAL_EST5EDT)).get()
         self.assertEqual(datetime(2003,10,26,0,59,tzinfo=tz).tzname(), "EDT")
         self.assertEqual(datetime(2003,10,26,1,00,tzinfo=tz).tzname(), "EST")
+
+    def testIgnoresGoofyAttribute(self):
+        tz = tzical(StringIO(self.TZICAL_EST5EDT_X_DASH_ATTRIBUTE)).get()
+        self.assertEqual(datetime(2003,10,26,0,59,tzinfo=tz).tzname(), "EDT")
+
+        self.assertRaises(ValueError, tzical, StringIO(self.TZICAL_EST5EDT_UTTERLY_GOOFY_ATTRIBUTE))
 
     def testRoundNonFullMinutes(self):
         # This timezone has an offset of 5992 seconds in 1900-01-01.

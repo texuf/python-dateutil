@@ -1,5 +1,5 @@
 """
-Copyright (c) 2003-2007  Gustavo Niemeyer <gustavo@niemeyer.net>
+Copyright (c) 2003-2010  Gustavo Niemeyer <gustavo@niemeyer.net>
 
 This module offers extensions to the standard python 2.3+
 datetime module.
@@ -11,6 +11,7 @@ import itertools
 import datetime
 import calendar
 import thread
+import heapq
 import sys
 
 __all__ = ["rrule", "rruleset", "rrulestr",
@@ -439,7 +440,7 @@ class rrule(rrulebase):
                 (freq >= MINUTELY and
                  self._byminute and minute not in self._byminute) or
                 (freq >= SECONDLY and
-                 self._bysecond and minute not in self._bysecond)):
+                 self._bysecond and second not in self._bysecond)):
                 timeset = ()
             else:
                 timeset = gettimeset(hour, minute, second)
@@ -837,7 +838,11 @@ class rruleset(rrulebase):
             try:
                 self.dt = self.gen()
             except StopIteration:
-                self.genlist.remove(self)
+                if self.genlist[0] is self:
+                    heapq.heappop(self.genlist)
+                else:
+                    self.genlist.remove(self)
+                    heapq.heapify(self.genlist)
 
         def __cmp__(self, other):
             return cmp(self.dt, other.dt)
@@ -867,27 +872,30 @@ class rruleset(rrulebase):
         self._genitem(rlist, iter(self._rdate).next)
         for gen in [iter(x).next for x in self._rrule]:
             self._genitem(rlist, gen)
-        rlist.sort()
+        heapq.heapify(rlist)
         exlist = []
         self._exdate.sort()
         self._genitem(exlist, iter(self._exdate).next)
         for gen in [iter(x).next for x in self._exrule]:
             self._genitem(exlist, gen)
-        exlist.sort()
+        heapq.heapify(exlist)
         lastdt = None
         total = 0
         while rlist:
             ritem = rlist[0]
             if not lastdt or lastdt != ritem.dt:
                 while exlist and exlist[0] < ritem:
-                    exlist[0].next()
-                    exlist.sort()
+                    exitem = exlist[0]
+                    exitem.next()
+                    if exlist and exlist[0] is exitem:
+                        heapq.heapreplace(exlist, exitem)
                 if not exlist or ritem != exlist[0]:
                     total += 1
                     yield ritem.dt
                 lastdt = ritem.dt
             ritem.next()
-            rlist.sort()
+            if rlist and rlist[0] is ritem:
+                heapq.heapreplace(rlist, ritem)
         self._len = total
 
 class _rrulestr:
@@ -999,7 +1007,7 @@ class _rrulestr:
                 line = lines[i].rstrip()
                 if not line:
                     del lines[i]
-                elif i > 0 and line[0] == " ":
+                elif i > 0 and line[0] in (" ", "\t"):
                     lines[i-1] += line[1:]
                     del lines[i]
                 else:
